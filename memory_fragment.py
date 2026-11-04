@@ -1,4 +1,4 @@
-"""Animated, persistent end-of-level memory collectible; no changes to physics."""
+"""Animate the memory fragment and track its collection."""
 import math
 import random
 import pygame
@@ -22,6 +22,19 @@ class MemoryFragment:
         self.heading = pygame.font.SysFont('Georgia',29)
         self.small = pygame.font.SysFont('Segoe UI',17)
         self.reset(False)
+        self.gold_frames=self.frames
+        self.blue_frames=[]
+        for original in self.gold_frames:
+            frame=original.copy()
+            for y in range(frame.get_height()):
+                for x in range(frame.get_width()):
+                    color=frame.get_at((x,y))
+                    brightness=max(color.r,color.g,color.b)
+                    frame.set_at((x,y),(round(brightness*.38),round(brightness*.82),brightness,color.a))
+            self.blue_frames.append(frame)
+
+    def set_blue(self,enabled):
+        self.frames=self.blue_frames if enabled else self.gold_frames
 
     def reset(self, collected):
         self.collected = bool(collected)
@@ -45,7 +58,7 @@ class MemoryFragment:
         if self.collected:
             self.near = False
             return False
-        # Two soft hops per cycle. Anchor to the actual randomized final island.
+        # Bounce the fragment above the final island.
         bounce = abs(math.sin(math.tau*self.time/self.BOUNCE_PERIOD))
         self.position.update(final_platform.centerx,
                              final_platform.top-40-self.BOUNCE_HEIGHT*bounce)
@@ -71,14 +84,14 @@ class MemoryFragment:
                       round((self.position.y-camera_y)*self.zoom))
             frame = self.frames[int(self.time*self.FRAME_FPS) % len(self.frames)]
             screen.blit(frame,frame.get_rect(center=center),special_flags=pygame.BLEND_PREMULTIPLIED)
-            # Orbiting sparks stay attached to the fragment as the camera moves.
+            # Keep the sparks moving around the fragment.
             for i in range(4):
                 phase = self.time*2+i*math.tau/4
                 x = center[0]+math.cos(phase)*22*self.zoom
                 y = center[1]+math.sin(phase)*9*self.zoom
                 pygame.draw.circle(screen,(255,224,146),(round(x),round(y)),2)
         if show_prompt and self.near and not self.collected:
-            text = self.small.render('Press E to touch the memory fragment', True, (255,235,184))
+            text = self.small.render('Press E to collect the Memory Fragment.', True, (190,235,255))
             box = text.get_rect(center=(round((self.position.x-camera_x)*self.zoom),
                                        round((self.position.y-camera_y)*self.zoom)-110))
             box.clamp_ip(screen.get_rect().inflate(-20,-20))

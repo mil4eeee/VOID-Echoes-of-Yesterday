@@ -1,4 +1,4 @@
-"""Grounded crouch animation and the second-island shadow encounter."""
+"""Handle crouching and the first flying shadow encounter."""
 import math
 import pygame
 
@@ -52,7 +52,7 @@ class CrouchAnimation:
         return (self.frames if facing_right else self.left)[self.index]
 
     def hurtbox(self,player):
-        # Terrain collider stays unchanged; combat follows the visible duck pose.
+        # Match damage detection to the crouching pose.
         height=90
         if self.active:
             height=max(48,min(90,math.ceil(self.frames[self.index].get_bounding_rect(64).height/self.zoom)-8))
@@ -98,7 +98,7 @@ class ShadowEncounter:
         elif self.state=='fly':
             old=self.body_rect()
             self.x-=self.SPEED*dt
-            # Swept body collision keeps a fast pass from skipping Meadow.
+            # Check the whole flight path so fast attacks still detect hits.
             if old.union(self.body_rect()).colliderect(hurtbox):
                 self.state,self.time='dissipate',0.0
                 self.hit_notice=3.0

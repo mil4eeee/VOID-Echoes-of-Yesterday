@@ -1,35 +1,87 @@
-"""Level 1 dialogue, one-time story triggers and silent chapter transitions."""
+"""Handle Level 1 dialogue, reactions, and screen fades."""
 import math
 import pygame
 
+DIALOGUES = {'opening': [('MEADOW', 'Ughhh... my head...'),
+             ('MEADOW', 'Where... am I? What is this place?'),
+             ('MEADOW', 'Come on, Meadow... think. How did I get here?'),
+             ('MEADOW', 'Nothing. Great. Just great.')],
+ 'healing_intro': [('MEADOW', "Huh? What's that glowing over there?"),
+                   ('MEADOW', 'Wait... a healing crystal? I recognize that!'),
+                   ('MEADOW', "But... how? Why can't I remember anything else?")],
+ 'healing_after': [('MEADOW', 'Ahh... much better. Guess I needed that.'),
+                   ('MEADOW',
+                    "Alright... I have no idea what's going on, but I can't stay here forever."),
+                   ('MEADOW', "Let's see where this leads.")],
+ 'second_platform': [('MEADOW', 'Well... at least these things seem stable.')],
+ 'shadow_before': [('MEADOW', 'WOAH! WHAT THE—?!')],
+ 'shadow_after': [('MEADOW', 'What the hell was THAT?!'),
+                  ('MEADOW', 'Was that some kind of... shadow spirit?'),
+                  ('MEADOW',
+                   'Okay... floating islands, creepy shadows trying to kill me... anything '
+                   'else?!')],
+ 'moving_platforms': [('MEADOW', 'Moving platforms. Of course. Why would anything be easy?'),
+                      ('MEADOW', "Alright, Meadow. Focus. You've got this.")],
+ 'memory_intro': [('MEADOW', "Wait... what's that?"),
+                  ('MEADOW', "It's... glowing. But it's different from the crystal."),
+                  ('MEADOW', 'Why does it feel so... familiar?'),
+                  ('MEADOW', "Something's telling me I need to touch it...")],
+ 'memory_after': [('MEADOW', 'Noatak...?'),
+                  ('MEADOW', 'Why... why do I know that name?'),
+                  ('MEADOW', 'Who are you?'),
+                  ('MEADOW', 'And what are you sorry for...?'),
+                  ('MEADOW', 'What the hell happened to me?')],
+ 'memory_before': [('MEADOW', "Wait... what's happening?"), ('MEADOW', 'My head...!')],
+ 'flashback': [('UNKNOWN VOICE', 'Meadow!'),
+               ('MEADOW', 'Huh...?'),
+               ('UNKNOWN VOICE', 'Meadow, look at me!'),
+               ('UNKNOWN VOICE', 'You have to trust me.'),
+               ('MEADOW', 'Wait... I know that voice...'),
+               ('UNKNOWN VOICE', "I'm sorry...")],
+ 'l2_arrival': [('MEADOW', 'Noatak...'),
+                ('MEADOW', 'Why does that name feel so familiar?'),
+                ('MEADOW', 'Ugh. The more I try to remember, the worse my head gets.'),
+                ('MEADOW', 'Alright... one thing at a time.'),
+                ('MEADOW', 'I need to find more of those fragments.')],
+ 'l2_duel_before': [('MEADOW', 'Oh, great. Another one of you.'),
+                    ('MEADOW', "You're not going to make this easy, are you?")],
+ 'l2_duel_after': [('MEADOW', "Huh. That wasn't so bad."),
+                   ('MEADOW', 'Guess I still remember how to fight.'),
+                   ('MEADOW', 'Funny how that works...')],
+ 'l2_moving': [('MEADOW', 'Another moving platform...'),
+               ('MEADOW', 'Alright. Just time the jump.')],
+ 'l2_two_before': [('MEADOW', "Wait... there's two of them?"),
+                   ('MEADOW', "Oh, you've got to be kidding me.")],
+ 'l2_flying': [('MEADOW', 'WOAH! Not again!')],
+ 'l2_two_after': [('MEADOW', 'Okay... that was a little too close.'),
+                  ('MEADOW', 'These things just keep coming.'),
+                  ('MEADOW', 'What even ARE they?')],
+ 'l2_memory_intro': [('MEADOW', 'Wait...'),
+                     ('MEADOW', 'Another fragment?'),
+                     ('MEADOW', 'So there are more of these things...'),
+                     ('MEADOW', 'If the last one showed me Noatak...'),
+                     ('MEADOW', 'Maybe this one will finally give me some answers.')]}
 
-DIALOGUES = {
-    'opening': [('MEADOW', line) for line in [
-        'Ugh... my head.', 'Where... am I?',
-        "This isn't right. I don't recognize any of this.", 'What is this place?']],
-    'healing_intro': [('MEADOW', line) for line in [
-        'Wait... I know what that is.', 'A healing crystal.', 'How do I know that...?']],
-    'healing_after': [('MEADOW', line) for line in [
-        "Huh... that's better.", 'At least I remember something.']],
-    'shadow_before': [('MEADOW', line) for line in [
-        'What was that...?', 'WOAH—!', 'Okay, definitely not friendly!', 'Stay back!']],
-    'shadow_after': [('MEADOW', line) for line in [
-        'Great. A forest full of things trying to kill me.', 'I need to get out of here.']],
-    'memory_intro': [('MEADOW', line) for line in [
-        'Another crystal...?', "No. This one's different.",
-        "Why does it feel like it's calling me?"]],
-    'flashback': [('UNKNOWN BOY', "Come on, Meadow! You're too slow!"),
-                  ('YOUNG MEADOW', 'Hey! Wait for me!')],
-    'memory_after': [('MEADOW', line) for line in [
-        'That... was me.', 'And that boy...', "Why can't I remember his face?"]],
-    'ending': [('MEADOW', line) for line in [
-        "Those weren't just visions...", 'They were memories.',
-        "If there's more of them out there...", 'Then I have to keep going.']],
-}
+# Pause briefly before these dialogue lines.
+DIALOGUE_PAUSES={('memory_after',4):.75,('l2_duel_after',2):.65,('l2_memory_intro',4):.65}
+
+
+class ScreenFade:
+    """Fade the screen using a black overlay."""
+    def __init__(self):
+        self.surface=None
+
+    def draw(self,screen,elapsed,duration,fade_in=False):
+        if self.surface is None or self.surface.get_size()!=screen.get_size():
+            self.surface=pygame.Surface(screen.get_size())
+            self.surface.fill((0,0,0))
+        progress=max(0,min(1,elapsed/max(.001,duration)))
+        self.surface.set_alpha(round(255*((1-progress) if fade_in else progress)))
+        screen.blit(self.surface,(0,0))
 
 
 class InputEdges:
-    """One action per physical E/Enter press, including across UI state changes."""
+    """Allow only one action each time E or Enter is pressed."""
     def __init__(self):
         self.held=set()
 
@@ -47,7 +99,7 @@ class InputEdges:
 
 
 class DialogueManager:
-    TYPEWRITER=False  # Enable if desired; Enter first reveals a typing line.
+    TYPEWRITER=True  # Press E to reveal the text, then again for the next line.
     LETTERS_PER_SECOND=45
 
     def __init__(self):
@@ -88,77 +140,73 @@ class DialogueManager:
                 line=candidate
         return lines+[line]
 
-    def draw(self,screen,flashback=False):
+    def draw(self,screen,reaction=False):
         speaker,text=DIALOGUES[self.scene][self.index]
         if self.TYPEWRITER:
             text=text[:int(self.reveal)]
         width,height=screen.get_size()
-        if flashback:
-            screen.fill((11,12,23))
-            label=self.small.render('A MEMORY',True,(189,163,106))
-            screen.blit(label,label.get_rect(center=(width//2,100)))
-            name=self.name_font.render(speaker,True,(245,213,151))
-            screen.blit(name,name.get_rect(center=(width//2,195)))
-            for i,line in enumerate(self.wrapped(text,width-120)):
-                image=self.body.render(line,True,(241,237,225))
-                screen.blit(image,image.get_rect(center=(width//2,250+i*34)))
-            hint=self.small.render('ENTER  —  Continue',True,(192,197,210))
-            screen.blit(hint,hint.get_rect(center=(width//2,height-55)))
-            return
-        panel=pygame.Surface((width-60,148),pygame.SRCALPHA)
+        panel=pygame.Surface((width-60,132),pygame.SRCALPHA)
         panel.fill((8,17,30,235))
         pygame.draw.rect(panel,(166,150,110),panel.get_rect(),1,border_radius=8)
         panel.blit(self.name_font.render(speaker,True,(244,215,151)),(24,15))
         for i,line in enumerate(self.wrapped(text,width-112)):
             panel.blit(self.body.render(line,True,(242,242,235)),(24,45+i*31))
-        hint=self.small.render('ENTER  —  Continue',True,(193,210,223))
-        panel.blit(hint,(panel.get_width()-hint.get_width()-24,120))
-        screen.blit(panel,(30,height-166))
+        hint=self.small.render('' if reaction else 'E  —  Reveal / Continue',True,(193,210,223))
+        panel.blit(hint,(panel.get_width()-hint.get_width()-24,108))
+        screen.blit(panel,(30,height-146))
 
 
 class LevelOneNarrative:
-    PHASES={'opening_fade','gameplay','dialogue','heal_pickup','gold_flash',
-            'flashback','forest_fade','exit_fade','chapter','shadow_tutorial'}
+    PHASES={'opening_hold','opening_fade','gameplay','dialogue','dialogue_pause','heal_pickup',
+            'gold_flash','memory_fade','flashback','flashback_gap','flashback_distort','black_cut','exit_fade','chapter'}
+    REACTIONS={'second_platform','shadow_before','moving_platforms','l2_moving','l2_flying'}
 
     def __init__(self):
+        self.fade=ScreenFade()
         self.dialogue=DialogueManager()
+        self.reaction=DialogueManager()
         self.title=pygame.font.SysFont('Georgia',31)
         self.small=pygame.font.SysFont('Segoe UI',19)
         self.reset()
 
     def reset(self,data=None,*,legacy=False,healed=False,memory=False):
         self.completed=set()
-        self.phase='opening_fade'
+        self.phase='opening_hold'
         self.time=0.0
         self.shadow_resolved=False
         self.dirty=False
         self.restart_tutorial=False
         self.input_used=False
         self.dialogue.scene=None
+        self.reaction.scene=None
         if isinstance(data,dict):
             completed=data.get('completed',[])
-            self.completed={name for name in completed if isinstance(name,str) and name in DIALOGUES} if isinstance(completed,list) else set()
+            self.completed={s for s in completed if isinstance(s,str) and s in DIALOGUES} if isinstance(completed,list) else set()
             phase=data.get('phase','gameplay')
             self.phase=phase if isinstance(phase,str) and phase in self.PHASES else 'gameplay'
             self.shadow_resolved=data.get('shadow_resolved') is True
             value=data.get('time',0)
-            self.time=max(0,min(2,float(value))) if type(value) in (int,float) and math.isfinite(value) else 0.0
-            if self.phase in ('dialogue','flashback','shadow_tutorial'):
-                scene=data.get('scene')
-                if isinstance(scene,str) and scene in DIALOGUES:
-                    index=data.get('line',0)
-                    self.dialogue.start(scene,index if type(index) is int else 0)
-                else:
-                    self.phase='gameplay'
+            self.time=max(0,min(30,float(value))) if type(value) in (int,float) and math.isfinite(value) else 0.0
+            scene=data.get('scene')
+            if self.phase in ('dialogue','dialogue_pause','flashback','flashback_gap','flashback_distort') and isinstance(scene,str) and scene in DIALOGUES and scene not in self.REACTIONS:
+                self.dialogue.start(scene,data.get('line',0) if type(data.get('line')) is int else 0)
+            elif self.phase in ('dialogue','dialogue_pause','flashback','flashback_gap','flashback_distort'):
+                self.phase='gameplay'
+            if self.phase=='exit_fade' and scene=='memory_after':
+                self.dialogue.start('memory_after',len(DIALOGUES['memory_after'])-1)
+            if self.dialogue.scene:
+                reveal=data.get('reveal',0)
+                if type(reveal) in (int,float) and math.isfinite(reveal):
+                    self.dialogue.reveal=max(0,min(float(reveal),len(DIALOGUES[self.dialogue.scene][self.dialogue.index][1])))
+            # Update older saves to use the current story transition.
+            if memory and data.get('version',0)<3 and (scene in ('flashback','ending') or phase=='forest_fade'):
+                self.begin('memory_after')
+            if memory and self.phase=='gameplay' and 'memory_after' in self.completed:
+                self.set_phase('exit_fade')
         elif legacy:
-            # Existing players keep their progress; do not replay the opening mid-level.
-            self.completed.add('opening')
-            self.phase='gameplay'
-            if healed:
-                self.completed.update(('healing_intro','healing_after'))
-            if memory:
-                self.completed.update(('memory_intro','flashback'))
-                self.phase='forest_fade'
+            self.completed.add('opening');self.phase='gameplay'
+            if healed:self.completed.update(('healing_intro','healing_after'))
+            if memory:self.begin('memory_after')
 
     @property
     def blocked(self):
@@ -166,143 +214,143 @@ class LevelOneNarrative:
 
     @property
     def portal_ready(self):
-        return 'ending' in self.completed
+        return False
 
     def snapshot(self):
-        return {'completed':sorted(self.completed),'phase':self.phase,'time':self.time,
-                'scene':self.dialogue.scene,'line':self.dialogue.index,
+        return {'version':3,'completed':sorted(self.completed),'phase':self.phase,'time':self.time,
+                'scene':self.dialogue.scene,'line':self.dialogue.index,'reveal':self.dialogue.reveal,
                 'shadow_resolved':self.shadow_resolved}
 
     def begin(self,scene):
-        if scene in self.completed:
-            return False
-        self.dialogue.start(scene)
-        self.phase='flashback' if scene=='flashback' else 'dialogue'
-        self.time=0.0
-        self.dirty=True
+        if scene in self.completed:return False
+        self.reaction.scene=None
+        self.dialogue.start(scene);self.set_phase('dialogue')
         return True
+
+    def react(self,scene):
+        if scene in self.completed:return
+        self.completed.add(scene)
+        self.reaction.start(scene)
+        self.dirty=True
 
     def set_phase(self,phase):
         self.phase=phase;self.time=0.0;self.dirty=True
 
     def advance(self):
-        if self.input_used or self.phase not in ('dialogue','flashback'):
+        if self.input_used or self.phase not in ('dialogue','flashback'):return
+        self.input_used=True;self.dirty=True
+        if self.phase=='flashback':
+            self.advance_flashback()
             return
-        self.input_used=True
-        self.dirty=True
-        previous_index = self.dialogue.index
+        previous=self.dialogue.index
         if not self.dialogue.advance():
-            if self.dialogue.scene == 'shadow_before' and previous_index == 0 and self.dialogue.index == 1:
-                self.set_phase('shadow_tutorial')
+            if previous!=self.dialogue.index and (self.dialogue.scene,self.dialogue.index) in DIALOGUE_PAUSES:
+                self.set_phase('dialogue_pause')
             return
         scene=self.dialogue.scene
         self.completed.add(scene)
-        if scene=='flashback':
-            self.set_phase('forest_fade')
-        elif scene=='memory_after':
-            self.begin('ending')
-        else:
-            self.set_phase('gameplay')
-            if scene=='opening':
-                self.restart_tutorial=True
+        self.finish_scene(scene)
+
+    def finish_scene(self,scene):
+        if scene=='memory_before':self.set_phase('memory_fade')
+        elif scene=='memory_after':self.set_phase('exit_fade')
+        else:self.set_phase('gameplay')
+        if scene=='opening':self.restart_tutorial=True
+
+    def advance_flashback(self):
+        previous=self.dialogue.index
+        if self.dialogue.advance():
+            self.completed.add('flashback')
+            self.set_phase('black_cut')
+        elif self.dialogue.index!=previous:
+            phase={3:'flashback_gap',5:'flashback_distort'}.get(self.dialogue.index,'flashback')
+            self.set_phase(phase)
+
+    def update_text(self,dt):
+        if self.phase in ('dialogue','flashback'):self.dialogue.update(dt)
+        if self.phase=='dialogue_pause' and self.time>=DIALOGUE_PAUSES.get((self.dialogue.scene,self.dialogue.index),.65):
+            self.set_phase('dialogue')
+        if self.phase=='gameplay' and self.reaction.scene:
+            self.reaction.update(dt)
+            text=DIALOGUES[self.reaction.scene][self.reaction.index][1]
+            if self.reaction.reveal>=len(text)+2.8*self.reaction.LETTERS_PER_SECOND:
+                if self.reaction.advance():self.reaction.scene=None
 
     def update(self,dt,orb):
         self.time+=dt
-        self.dialogue.update(dt)
-        if self.phase=='opening_fade' and self.time>=1.0:
-            self.begin('opening')
-        elif self.phase=='heal_pickup' and orb.state=='gone':
-            self.begin('healing_after')
-        elif self.phase=='gold_flash' and self.time>=.5:
-            self.begin('flashback')
-        elif self.phase=='forest_fade' and self.time>=.8:
-            self.begin('memory_after')
-        elif self.phase=='exit_fade' and self.time>=1.0:
-            # No Level 2 exists in this project yet: use the requested chapter placeholder.
-            self.set_phase('chapter')
+        self.update_text(dt)
+        if self.phase=='opening_hold' and self.time>=.75:self.set_phase('opening_fade')
+        elif self.phase=='opening_fade' and self.time>=3:self.begin('opening')
+        elif self.phase=='heal_pickup' and orb.state=='gone':self.begin('healing_after')
+        elif self.phase=='gold_flash' and self.time>=.3:self.begin('memory_before')
+        elif self.phase=='memory_fade' and self.time>=1.2:
+            self.dialogue.start('flashback');self.set_phase('flashback')
+        elif self.phase=='flashback':
+            text=DIALOGUES['flashback'][self.dialogue.index][1]
+            if self.time>=len(text)/self.dialogue.LETTERS_PER_SECOND+2.2:
+                self.advance_flashback()
+        elif self.phase=='flashback_gap' and self.time>=.65:self.set_phase('flashback')
+        elif self.phase=='flashback_distort' and self.time>=.6:self.set_phase('flashback')
+        elif self.phase=='black_cut' and self.time>=.85:self.begin('memory_after')
+        elif self.phase=='exit_fade' and self.time>=1.2:self.set_phase('chapter')
 
     @staticmethod
     def supported(player,islands):
         return any(player.bottom==p.top and player.right>p.left and player.left<p.right for p in islands)
 
     def poll(self,player,islands,orb,memory,shadow):
-        if self.blocked:
-            return
-        if shadow.state in ('finished','dissipate') or shadow.hit_notice>0:
-            self.shadow_resolved=True
+        if self.blocked:return
+        if shadow.state in ('finished','dissipate') or shadow.hit_notice>0:self.shadow_resolved=True
         grounded=self.supported(player,islands)
-        if shadow.state=='warning' and 'shadow_before' not in self.completed:
-            self.begin('shadow_before')
+        if shadow.state in ('warning','fly'):
+            self.react('shadow_before')
         elif self.shadow_resolved and grounded and 'shadow_after' not in self.completed:
             self.begin('shadow_after')
         elif grounded and orb.near and not orb.collected and 'healing_intro' not in self.completed:
             self.begin('healing_intro')
         elif grounded and memory.near and not memory.collected and 'memory_intro' not in self.completed:
             self.begin('memory_intro')
+        elif self.supported(player,[islands[1]]):
+            self.react('second_platform')
+        elif ('shadow_after' in self.completed and 'moving_platforms' not in self.completed
+              and player.centerx>=islands[2].right-90):
+            self.react('moving_platforms')
 
-    def practice_crouch(self, crouch):
-        # Keep the enemy and world frozen until the player has tried the dodge.
-        if self.phase == 'shadow_tutorial' and crouch.state == 'hold':
-            self.set_phase('dialogue')  # Resume at WOAH, after the instruction.
-
-    def on_heal(self):
-        self.set_phase('heal_pickup')
-
-    def on_memory(self):
-        self.set_phase('gold_flash')
-
-    def portal_position(self,island):
-        return pygame.Vector2(island.right-36,island.top-42)
-
-    def portal_near(self,player,island):
-        return self.portal_ready and pygame.Vector2(player.centerx,player.bottom-30).distance_to(self.portal_position(island))<=54
-
-    def draw_portal(self,screen,island,camera_x,camera_y,zoom,player):
-        if not self.portal_ready:
-            return
-        pos=self.portal_position(island)
-        center=(round((pos.x-camera_x)*zoom),round((pos.y-camera_y)*zoom))
-        surface=pygame.Surface((round(80*zoom),round(105*zoom)),pygame.SRCALPHA)
-        mid=(surface.get_width()//2,surface.get_height()//2)
-        pulse=1+.035*math.sin(pygame.time.get_ticks()/350)
-        for radius,alpha in [(35,12),(31,22),(27,40),(23,75)]:
-            rect=pygame.Rect(0,0,round(radius*2*zoom*pulse),round(84*zoom*pulse))
-            rect.center=mid
-            pygame.draw.ellipse(surface,(124,183,244,alpha),rect)
-        rim=pygame.Rect(0,0,round(43*zoom),round(82*zoom));rim.center=mid
-        pygame.draw.ellipse(surface,(245,214,146,235),rim,3)
-        screen.blit(surface,surface.get_rect(center=center))
-        if not self.blocked and self.portal_near(player,island):
-            label=self.small.render('Press E to enter',True,(255,233,173))
-            rect=label.get_rect(center=(center[0],center[1]-round(55*zoom)))
-            rect.clamp_ip(screen.get_rect().inflate(-16,-16))
-            pygame.draw.rect(screen,(11,22,34),rect.inflate(20,12),border_radius=5)
-            screen.blit(label,rect)
+    def on_heal(self):self.set_phase('heal_pickup')
+    def on_memory(self):self.set_phase('gold_flash')
+    def portal_near(self,*args):return False
+    def draw_portal(self,*args):pass
 
     def draw(self,screen):
-        if self.phase in ('dialogue','flashback'):
-            self.dialogue.draw(screen,self.phase=='flashback')
-        elif self.phase in ('opening_fade','forest_fade','exit_fade','gold_flash'):
-            color=(0,0,0)
-            if self.phase=='gold_flash':
-                color=(255,218,130)
-                alpha=round(245*min(1,self.time/.16))
-            elif self.phase=='exit_fade':
-                alpha=round(255*min(1,self.time))
-            else:
-                duration=.8 if self.phase=='forest_fade' else 1.0
-                alpha=round(255*(1-min(1,self.time/duration)))
-            veil=pygame.Surface(screen.get_size());veil.fill(color);veil.set_alpha(alpha)
+        memory_backdrop=(self.phase in ('flashback','flashback_gap','flashback_distort','black_cut')
+                         or (self.dialogue.scene=='memory_after' and self.phase in ('dialogue','dialogue_pause','exit_fade')))
+        if memory_backdrop:
+            screen.fill((10,9,3) if self.phase!='black_cut' else (0,0,0))
+        if self.phase=='dialogue':self.dialogue.draw(screen)
+        elif self.phase=='gameplay' and self.reaction.scene:self.reaction.draw(screen,reaction=True)
+        elif self.phase=='flashback':
+            speaker,text=DIALOGUES['flashback'][self.dialogue.index]
+            text=text[:int(self.dialogue.reveal)]
+            width,height=screen.get_size()
+            name=self.dialogue.name_font.render(speaker,True,(195,170,91))
+            screen.blit(name,name.get_rect(center=(width//2,height//2-45)))
+            for i,line in enumerate(self.dialogue.wrapped(text,width-120)):
+                image=self.dialogue.body.render(line,True,(236,217,160))
+                screen.blit(image,image.get_rect(center=(width//2,height//2+i*32)))
+            hint=self.dialogue.small.render('E — Reveal / Continue',True,(136,128,98))
+            screen.blit(hint,hint.get_rect(center=(width//2,height-45)))
+        elif self.phase=='flashback_distort':
+            for i in range(7):
+                y=int(screen.get_height()*(i+1)/8)
+                offset=round(15*math.sin(self.time*13+i))
+                pygame.draw.line(screen,(42,35,9),(90+offset,y),(screen.get_width()-90+offset,y),1)
+        elif self.phase=='opening_hold':screen.fill((0,0,0))
+        elif self.phase=='opening_fade':self.fade.draw(screen,self.time,3,fade_in=True)
+        elif self.phase in ('memory_fade','exit_fade'):self.fade.draw(screen,self.time,1.2)
+        elif self.phase=='gold_flash':
+            veil=pygame.Surface(screen.get_size());veil.fill((255,219,96))
+            veil.set_alpha(round(240*max(0,1-self.time/.3)))
             screen.blit(veil,(0,0))
-        elif self.phase=='chapter':
-            screen.fill((7,11,22))
-            for text,font,y,color in [
-                ('CHAPTER II — THE FORGOTTEN RUINS',self.title,200,(242,217,164)),
-                ('To be continued',self.small,265,(213,222,236)),
-                ('ENTER / ESC — Return to main menu',self.small,380,(191,208,220))]:
-                image=font.render(text,True,color)
-                screen.blit(image,image.get_rect(center=(screen.get_width()//2,y)))
-            pygame.draw.rect(screen,(142,151,167),self.return_button(screen.get_size()),1,border_radius=6)
 
     @staticmethod
     def return_button(size):

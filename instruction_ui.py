@@ -1,4 +1,4 @@
-"""Readable screen-space instruction bubbles anchored to world objects."""
+"""Draw instruction bubbles near objects in the level."""
 import pygame
 
 

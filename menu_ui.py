@@ -1,8 +1,9 @@
-"""Menu UI and small, atomic JSON saves for VOID."""
+"""Draw the menu and safely save progress as JSON."""
 import json
 import math
 from pathlib import Path
 import pygame
+from level_three import valid_motion_save
 
 
 def read_json(path):
@@ -26,29 +27,32 @@ def valid_save(data):
     try:
         widths = data["widths"]
         level=data.get('level',1)
-        if type(level) is not int or level not in (1,2):
+        if type(level) is not int or level not in (1,2,3):
             return False
         ranges = ([(300,300),(270,270),(280,280),(290,290),(210,210)] if level==2
                   else [(280,320),(200,240),(200,240),(180,220),(160,200)])
+        if level==3:
+            ranges=[(w,w) for w in (300,270,270,250,310,280)]
+            if not valid_motion_save(data.get('moving_islands')):return False
         island_ids=data['islands']
-        valid_islands=(isinstance(island_ids,list) and len(island_ids)==5
+        valid_islands=(isinstance(island_ids,list) and len(island_ids)==len(ranges)
                        and all(type(i) is int and 0<=i<5 for i in island_ids))
         if level==1:
             valid_islands=valid_islands and sorted(island_ids)==list(range(5))
         duels=data.get('duels',[2,2])
-        if level==2 and not (isinstance(duels,list) and len(duels)==2
+        if level>=2 and not (isinstance(duels,list) and len(duels)==2
                             and all(type(hp) is int and 0<=hp<=2 for hp in duels)):
             return False
         return (
-            isinstance(widths, list) and len(widths) == 5
+            isinstance(widths, list) and len(widths) == len(ranges)
             and all(type(w) is int and lo <= w <= hi for w,(lo,hi) in zip(widths,ranges))
             and valid_islands
             and all(type(i) is int for i in data["islands"])
-            and type(data["x"]) is int and 0 <= data["x"] <= (1800 if level==2 else 1560)
+            and type(data["x"]) is int and 0 <= data["x"] <= (2320 if level==3 else (1800 if level==2 else 1560))
             and type(data["y"]) is int and -500 <= data["y"] <= 540
             and type(data["velocity_y"]) in (float,int) and -50 <= data["velocity_y"] <= 100
             and type(data["on_ground"]) is bool and type(data["facing_right"]) is bool
-            and type(data["moving_x"]) is int and (710 if level==2 else 850) <= data["moving_x"] <= (900 if level==2 else 1190)
+            and type(data["moving_x"]) is int and (360 if level==3 else (710 if level==2 else 850)) <= data["moving_x"] <= (470 if level==3 else (900 if level==2 else 1190))
             and data["moving_speed"] in (-2, 2)
             and type(data.get("hp", 75)) is int and 0 <= data.get("hp",75) <= 100
             and type(data.get("healing_collected", False)) is bool
@@ -80,7 +84,7 @@ class MenuUI:
         self.subtitle_font = pygame.font.SysFont("Segoe UI", 17)
         self.button_font = pygame.font.SysFont("Segoe UI", 23, bold=True)
         self.tiny = pygame.font.SysFont("Segoe UI", 12, bold=True)
-        # Fully cover the small baked-in title/buttons; render fresh text at native size.
+        # Cover the image’s old menu text and draw sharper text.
         self.scrim = pygame.Surface(size, pygame.SRCALPHA)
         self.scrim.fill((0, 0, 0, 0))
         self.scrim.fill((10, 16, 29, 255), (0, 0, 430, size[1]))
@@ -196,7 +200,7 @@ class MenuUI:
         muted = (166, 180, 197)
         screen.blit(self.background, self.background_rect)
         screen.blit(self.scrim, (0, 0))
-        # A few restrained gold motes animate the artwork without blurring the UI.
+        # Add a few floating gold particles to the menu.
         seconds = pygame.time.get_ticks() / 1000
         for i in range(12):
             x = 520 + (i * 71) % 415 + 8 * math.sin(seconds * .2 + i)
@@ -233,7 +237,7 @@ class MenuUI:
                 self.text(screen, "Your current progress will be lost.", self.small, (480,231), muted)
             if self.page == "controls":
                 for i, (key, action) in enumerate([("A / D", "Move left / right"),
-                       ("SPACE", "Jump"), ("E", "Interact / heal"), ("S / DOWN", "Crouch / dodge"), ("F", "Strike (Level 2)"), ("ESC", "Pause / resume")]):
+                       ("SPACE", "Jump"), ("E", "Interact / heal"), ("S / DOWN", "Crouch / dodge"), ("F / G", "Sweep / overhead strike"), ("ESC", "Pause / resume")]):
                     y = 165 + i*34
                     pygame.draw.rect(screen, (35,49,66), (270,y,98,34), border_radius=5)
                     pygame.draw.rect(screen, (90,114,132), (270,y,98,34),1,border_radius=5)

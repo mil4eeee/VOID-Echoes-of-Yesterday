@@ -9,6 +9,8 @@ from memory_fragment import MemoryFragment
 from shadow_encounter import CrouchAnimation, ShadowEncounter
 from health_healing import Health, HealingOrb, OpeningTutorial
 from instruction_ui import draw_instruction
+from meadow_combat import MeadowAttack
+from level_three import LevelThreeStory, MovingIslands, ISLANDS as L3_ISLANDS, ART_ORDER as L3_ART, WORLD_WIDTH as L3_WIDTH
 from level_two import LevelTwoStory, LevelTwoCombat, ISLANDS, MOVING, MOVING_LIMITS, WORLD_WIDTH
 from narrative import LevelOneNarrative, InputEdges
 
@@ -18,16 +20,17 @@ pygame.font.init()
 WIDTH = 960
 HEIGHT = 540
 LEVEL_WIDTH = 1600
+current_level = 1
 ZOOM = 1.7
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-# Visible area in world coordinates; physics stays in world pixels.
+# Calculate how much of the level the camera can see.
 VIEW_WIDTH = WIDTH / ZOOM
 VIEW_HEIGHT = HEIGHT / ZOOM
 
 
 def camera_rect(rect, camera_x, camera_y):
-    """Project world edges to screen pixels, keeping adjacent edges aligned."""
+    """Convert level positions to screen positions without gaps."""
     left = round((rect.left - camera_x) * ZOOM)
     top = round((rect.top - camera_y) * ZOOM)
     right = round((rect.right - camera_x) * ZOOM)
@@ -35,16 +38,13 @@ def camera_rect(rect, camera_x, camera_y):
     return pygame.Rect(left, top, right - left, bottom - top)
 
 def scale_alpha(source, size):
-    """Filter color multiplied by alpha to avoid dark transparent-edge halos.
-
-    These surfaces must be drawn with BLEND_PREMULTIPLIED.
-    """
+    """Avoid dark sprite edges and draw the result with BLEND_PREMULTIPLIED."""
     return pygame.transform.smoothscale(source.premul_alpha(), size)
 
 
 pygame.display.set_caption("Void: Echoes of Yesterday")
 
-# Load once, then scale to cover the window without changing the aspect ratio.
+# Fit the background to the window without stretching it.
 background_path = (Path(__file__).resolve().parent / "assets" / "backgrounds"
                    / "moonlit_forest.png")
 background_source = pygame.image.load(str(background_path)).convert()
@@ -61,8 +61,8 @@ clock = pygame.time.Clock()
 
 meadow = pygame.Rect(80, 400, 40, 60)
 
-# Each extracted PNG uses the same 280 x 340 canvas and foot baseline.
-# Keep the standing character about 100 world pixels tall, preserving aspect ratio.
+# All frames use the same canvas size and foot position.
+# Make Meadow about 100 pixels tall without stretching her.
 ASSET_DIR = Path(__file__).resolve().parent / "assets" / "characters" / "meadow"
 SPRITE_SCALE = 100 / 320
 ANIMATION_FPS = {"idle": 4.0, "run": 12.0, "jump": 8.0}
@@ -83,7 +83,7 @@ def load_animation(name, count):
 animations = {
     name: load_animation(name, count) for name, count in FRAME_COUNTS.items()
 }
-# Precompute left-facing frames; no scaling or flipping is needed every frame.
+# Prepare left-facing frames once to save work while playing.
 animations_left = {
     name: [pygame.transform.flip(frame, True, False) for frame in frames]
     for name, frames in animations.items()
@@ -114,8 +114,8 @@ moving_speed = 2
 moving_min_x = 850
 moving_max_x = 1190
 
-# Each crop has its own walking-surface anchor (left, top, width).
-# Plants and rock beneath that line are decoration, not extra collision shapes.
+# Mark the walkable surface of each island image.
+# Plants and hanging rocks are only decoration.
 ISLAND_SURFACES = [(25, 110, 475), (30, 150, 455), (35, 245, 470),
                    (25, 155, 585), (25, 175, 565)]
 platform_asset_dir = Path(__file__).resolve().parent / "assets" / "platforms"
@@ -123,12 +123,16 @@ island_sources = [
     pygame.image.load(str(platform_asset_dir / f"island_{i:02d}.png")).convert_alpha()
     for i in range(1, 6)
 ]
-# Choose once per launch; neither respawning nor moving the camera reshuffles art.
+# Choose island images once when the game starts.
 island_order = random.sample(range(5), 5)
+def terrain_platforms():
+    return platforms if current_level == 3 else platforms + [moving_platform]
+
+
 def rebuild_platform_art():
     global platform_art
     platform_art = []
-    for platform, island_index in zip(platforms + [moving_platform], island_order):
+    for platform, island_index in zip(terrain_platforms(), island_order):
         source = island_sources[island_index]
         surface_x, surface_y, surface_width = ISLAND_SURFACES[island_index]
         scale = platform.width * ZOOM / surface_width
@@ -148,7 +152,7 @@ def draw_island(platform, art, camera_x, camera_y):
                 special_flags=pygame.BLEND_PREMULTIPLIED)
 
 
-# Cosmetic particles use their own RNG, leaving platform randomization alone.
+# Randomize fireflies separately from platforms.
 FIREFLY_COUNT = 42
 FIREFLY_SPEED = 1.0
 firefly_rng = random.Random()
@@ -162,7 +166,7 @@ for radius, color in [(6, (150, 225, 105)), (9, (85, 190, 170)),
         for y in range(-radius, radius + 1):
             for x in range(-radius, radius + 1):
                 distance = math.hypot(x, y)
-                # A tiny bright core and a broad, faint halo; black adds nothing.
+                # Draw a bright center with a soft glow.
                 intensity = (0.17 * math.exp(-distance * distance / (radius * 0.45)**2)
                              + 0.83 * math.exp(-distance * distance / 1.6))
                 glow.set_at((x + radius, y + radius),
@@ -210,6 +214,7 @@ project_root = Path(__file__).resolve().parent
 menu = MenuUI(project_root, (WIDTH, HEIGHT))
 memory_fragment = MemoryFragment(project_root, ZOOM)
 crouch = CrouchAnimation(project_root, ZOOM)
+meadow_attack = MeadowAttack(project_root, ZOOM)
 shadow = ShadowEncounter(project_root, ZOOM)
 health = Health()
 healing_orb = HealingOrb(project_root, ZOOM)
@@ -217,6 +222,7 @@ opening_tutorial = OpeningTutorial()
 story = LevelOneNarrative()
 current_level = 1
 level2_combat = None
+moving_group = None
 input_edges = InputEdges()
 app_state = "menu"
 session_active = False
@@ -238,14 +244,16 @@ def save_progress():
     data = {"version": 1, "x": meadow.x, "y": meadow.y,
             "velocity_y": velocity_y, "on_ground": on_ground,
             "facing_right": facing_right,
-            "widths": [p.width for p in platforms + [moving_platform]],
+            "widths": [p.width for p in terrain_platforms()],
             "islands": island_order, "moving_x": moving_platform.x,
             "moving_speed": moving_speed,
             "memory_collected": memory_fragment.collected,
             "hp": health.current, "healing_collected": healing_orb.collected,
             "tutorial_seen": not opening_tutorial.active,
             "narrative": story.snapshot(), "level": current_level,
-            "duels": level2_combat.snapshot() if level2_combat else []}
+            "duels": level2_combat.snapshot() if level2_combat else [],
+            "level2_healing_collected": current_level == 2 and healing_orb.collected,
+            "moving_islands": moving_group.snapshot() if moving_group else []}
     try:
         write_json(menu.save_path, data)
         menu.saved = data
@@ -259,9 +267,18 @@ def save_progress():
 
 def configure_level(number):
     global current_level, platforms, moving_platform, moving_min_x, moving_max_x
-    global LEVEL_WIDTH, story, level2_combat, spawn_x, spawn_y
+    global LEVEL_WIDTH, story, level2_combat, spawn_x, spawn_y, moving_group
     current_level = number
-    if number == 2:
+    moving_group = None
+    if number == 3:
+        platforms = [pygame.Rect(values) for values in L3_ISLANDS]
+        moving_platform = platforms[1]  # Keep the first moving platform compatible with older saves.
+        moving_min_x, moving_max_x = 360,470
+        LEVEL_WIDTH = L3_WIDTH
+        moving_group = MovingIslands(platforms)
+        story = LevelThreeStory()
+        level2_combat = LevelTwoCombat(project_root, ZOOM, platforms, enemy_indices=(1,4))
+    elif number == 2:
         platforms = [pygame.Rect(values) for values in ISLANDS]
         moving_platform = pygame.Rect(MOVING)
         moving_min_x, moving_max_x = MOVING_LIMITS
@@ -300,14 +317,24 @@ def start_game(continue_saved=False, level=1, carry_hp=None):
         island_order = random.sample(range(5), 5)
         moving_platform.x, moving_speed = 950, 2
     if current_level == 2 and not continue_saved:
-        widths = [p.width for p in platforms + [moving_platform]]
+        widths = [p.width for p in terrain_platforms()]
         moving_platform.x = MOVING[0]
         island_order = [0,4,4,1,3]
-    for platform, width in zip(platforms + [moving_platform], widths):
+    if current_level == 3:
+        if continue_saved:
+            # Restore moving platforms and the enemies riding them.
+            moving_platform.x = L3_ISLANDS[1][0]
+            moving_group.restore(menu.saved.get('moving_islands'),level2_combat.enemies)
+        else:
+            moving_platform.x = L3_ISLANDS[1][0]
+            widths = [p.width for p in terrain_platforms()]
+            island_order = list(L3_ART)
+    for platform, width in zip(terrain_platforms(), widths):
         platform.width = width
     rebuild_platform_art()
-    # Older saves have no fragment field and start with the fragment available.
+    # Leave the fragment available if an older save has no pickup record.
     memory_fragment.reset(continue_saved and menu.saved.get("memory_collected") is True)
+    memory_fragment.set_blue(False)  # Use yellow memory fragments in every level.
     health.reset(menu.saved.get("hp", Health.START_HP) if continue_saved else Health.START_HP)
     if carry_hp is not None:
         health.reset(carry_hp)
@@ -318,12 +345,18 @@ def start_game(continue_saved=False, level=1, carry_hp=None):
     healing_orb.reset(continue_saved and menu.saved.get("healing_collected") is True)
     opening_tutorial.reset(continue_saved and menu.saved.get("tutorial_seen") is True)
     if current_level == 2:
-        healing_orb.reset(True)
+        healing_orb.reset(continue_saved and menu.saved.get("level2_healing_collected") is True)
         opening_tutorial.reset(True)
         if continue_saved:
             level2_combat.restore(menu.saved.get('duels'))
+    if current_level == 3:
+        opening_tutorial.reset(True)
+        if continue_saved:level2_combat.restore(menu.saved.get('duels'))
     crouch.reset()
+    meadow_attack.reset()
     shadow.reset()
+    shadow.WARNING_SECONDS = 1.25 if current_level in (1,3) else .65
+    healing_orb.horizontal_offset = 55 if current_level == 2 else 190
     animation_state, animation_time = "idle", 0.0
     autosave_time = 0.0
     app_state, session_active = "game", True
@@ -331,9 +364,6 @@ def start_game(continue_saved=False, level=1, carry_hp=None):
     story.reset(menu.saved.get("narrative") if continue_saved else None,
                 legacy=continue_saved and "narrative" not in menu.saved,
                 healed=healing_orb.collected, memory=memory_fragment.collected)
-    if story.dialogue.scene == 'shadow_before' and story.blocked:
-        shadow.state = 'warning'
-        shadow.x, shadow.y = platforms[1].right+45, platforms[1].top-90
     if not continue_saved:
         meadow.bottom = platforms[0].top
         velocity_y, on_ground = 0.0, True
@@ -350,12 +380,12 @@ while running:
     dt = clock.tick(60) / 1000.0
 
     interact_pressed = False
-    attack_pressed = False
+    attack_pressed = None
     story.input_used = False
     world_was_blocked = story.blocked
     for event in pygame.event.get():
         fresh = input_edges.consume(event)
-        if event.type == pygame.KEYDOWN and event.key in (pygame.K_e, pygame.K_f, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE) and not fresh:
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_e, pygame.K_f, pygame.K_g, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE) and not fresh:
             continue
         if event.type == pygame.QUIT:
             running = False
@@ -367,12 +397,12 @@ while running:
                     save_progress()
                     menu.open("main")
                     app_state = "menu"
-            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_e, pygame.K_RETURN, pygame.K_KP_ENTER) and story.phase in ('dialogue','flashback'):
                 story.advance()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_e and not world_was_blocked and not story.blocked:
                 interact_pressed = True
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_f and not world_was_blocked and not story.blocked:
-                attack_pressed = True
+            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_g) and not world_was_blocked and not story.blocked:
+                attack_pressed = "sweep" if event.key == pygame.K_f else "overhead"
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 save_progress()
                 menu.pause_image = screen.copy()
@@ -401,20 +431,23 @@ while running:
         pygame.display.flip()
         continue
 
-    # Dialogue/cutscenes freeze physics, moving platforms, combat, and interactions.
+    healing_platform = platforms[3] if current_level == 3 else (platforms[-1] if current_level == 2 else platforms[0])
+    if moving_group:
+        # Keep Level 3 platforms moving during dialogue.
+        moving_group.update(dt, meadow, velocity_y, level2_combat.enemies, healing_orb)
+    # Pause gameplay when the story blocks controls.
     if story.phase == 'heal_pickup':
-        healing_orb.update(dt, meadow, platforms[0], False, health)
+        healing_orb.update(dt, meadow, healing_platform, False, health)
     if story.phase == 'gold_flash':
         memory_fragment.update(dt, meadow, platforms[-1], False)
-    if story.phase == 'shadow_tutorial':
-        held = pygame.key.get_pressed()
-        crouch.update(dt, held[pygame.K_s] or held[pygame.K_DOWN], True)
-        story.practice_crouch(crouch)
     story.update(dt, healing_orb)
-    if current_level == 1 and story.phase == 'chapter':
-        start_game(level=2, carry_hp=health.current)
+    if current_level in (1,2) and story.phase == 'chapter':
+        start_game(level=current_level+1, carry_hp=health.current)
         world_was_blocked = True
-    story.poll(meadow, platforms + [moving_platform], healing_orb, memory_fragment, shadow)
+    if current_level >= 2:
+        story.poll(meadow, terrain_platforms(), healing_orb, memory_fragment, shadow, level2_combat)
+    else:
+        story.poll(meadow, terrain_platforms(), healing_orb, memory_fragment, shadow)
     if story.restart_tutorial:
         opening_tutorial.reset(False)
         story.restart_tutorial = False
@@ -422,6 +455,7 @@ while running:
         opening_tutorial.reset(True)
     dx = 0
     respawned = False
+    all_platforms = terrain_platforms()
     gameplay_allowed = not story.blocked and not world_was_blocked
     game_dt = dt if gameplay_allowed else 0.0
     if gameplay_allowed:
@@ -429,31 +463,32 @@ while running:
         health.update(dt)
         opening_tutorial.update(dt)
 
-        old_platform_x = moving_platform.x
-        moving_platform.x += moving_speed
+        if current_level != 3:
+            old_platform_x = moving_platform.x
+            moving_platform.x += moving_speed
 
-        if moving_platform.x >= moving_max_x:
-            moving_platform.x = moving_max_x
-            moving_speed = -abs(moving_speed)
+            if moving_platform.x >= moving_max_x:
+                moving_platform.x = moving_max_x
+                moving_speed = -abs(moving_speed)
 
-        elif moving_platform.x <= moving_min_x:
-            moving_platform.x = moving_min_x
-            moving_speed = abs(moving_speed)
+            elif moving_platform.x <= moving_min_x:
+                moving_platform.x = moving_min_x
+                moving_speed = abs(moving_speed)
 
-        platform_dx = moving_platform.x - old_platform_x
+            platform_dx = moving_platform.x - old_platform_x
 
-        if (
-            on_ground
-            and meadow.bottom == moving_platform.top
-            and meadow.right > old_platform_x
-            and meadow.left < old_platform_x + moving_platform.width
-        ):
-            meadow.x += platform_dx
+            if (
+                on_ground
+                and meadow.bottom == moving_platform.top
+                and meadow.right > old_platform_x
+                and meadow.left < old_platform_x + moving_platform.width
+            ):
+                meadow.x += platform_dx
 
-        # S / Down lowers the combat hurtbox while terrain physics remains stable.
+        # Crouching lowers the damage area without changing platform collisions.
         grounded_before_move = velocity_y >= 0 and any(
             meadow.bottom == p.top and meadow.right > p.left and meadow.left < p.right
-            for p in platforms + [moving_platform]
+            for p in terrain_platforms()
         )
         crouch.update(dt, keys[pygame.K_s] or keys[pygame.K_DOWN], grounded_before_move)
         move_speed = 2 if crouch.active else speed
@@ -470,7 +505,7 @@ while running:
         before_move_x = meadow.x
         meadow.x += dx
 
-        all_platforms = platforms + [moving_platform]
+        all_platforms = terrain_platforms()
 
         for platform in all_platforms:
             if meadow.colliderect(platform):
@@ -517,6 +552,7 @@ while running:
             if level2_combat:
                 level2_combat.respawn()
             crouch.reset()
+            meadow_attack.reset()
             shadow.reset()
         grounded_now = velocity_y >= 0 and any(
             meadow.bottom == p.top and meadow.right > p.left and meadow.left < p.right
@@ -524,13 +560,19 @@ while running:
         )
         if not grounded_now:
             crouch.reset()
-        # The second island is the first encounter; the opening tutorial is protected.
+        if crouch.active:
+            meadow_attack.reset()
+        elif attack_pressed:
+            meadow_attack.start(attack_pressed, facing_right)
+        attack_contact = meadow_attack.update(dt)
+        # Start the first encounter after the opening tutorial.
         shadow_hit = False
-        if not opening_tutorial.active:
-            shadow_hit = shadow.update(dt, meadow, crouch.hurtbox(meadow), platforms[1 if current_level == 1 else 2])
+        if not opening_tutorial.active and (current_level in (1,3) or 'l2_two_before' in story.completed):
+            shadow_hit = shadow.update(dt, meadow, crouch.hurtbox(meadow), platforms[4 if current_level == 3 else 2])
         if level2_combat:
-            if level2_combat.update(dt, meadow, facing_right, attack_pressed, health,
-                                    shadow.state in ('warning','fly')):
+            if level2_combat.update(dt, meadow, meadow_attack.facing_right, attack_contact, health,
+                                    shadow.state in ('warning','fly'),
+                                    enabled=(True,True) if current_level == 3 else ('l2_duel_before' in story.completed,'l2_two_before' in story.completed)):
                 story.dirty = True
             if health.current == 0:
                 shadow_hit = True
@@ -538,12 +580,13 @@ while running:
         if shadow_hit:
             health.damage(Health.SHADOW_DAMAGE)
             if health.current == 0:
-                health.reset()  # A depleted life respawns with the starting 75 HP.
+                health.reset()  # Restore 75 HP after dying.
             meadow.topleft = (spawn_x, spawn_y)
             velocity_y, on_ground = 0.0, False
             respawned = True
             crouch.reset()
             animation_time = 0.0
+            meadow_attack.reset()
             if level2_combat:
                 level2_combat.respawn()
 
@@ -555,24 +598,26 @@ while running:
             )
         )
 
-        # Follow the visual body vertically and clamp to the existing level bounds.
+        # Follow Meadow without moving the camera outside the level.
         camera_y = max(
             0,
             min(meadow.bottom - 50 - VIEW_HEIGHT / 2, max(0, HEIGHT - VIEW_HEIGHT))
         )
 
-        if healing_orb.update(dt, meadow, platforms[0],
+        if (current_level in (1,3) or story.flying_cleared) and healing_orb.update(dt, meadow, healing_platform,
                               interact_pressed and 'healing_intro' in story.completed, health):
+            if current_level == 1:
+                health.heal(Health.MAX_HP)
             story.on_heal()
             interact_pressed = False
-            save_progress()  # Commit HP and the consumed orb together.
+            save_progress()  # Save health and crystal collection together.
 
         if memory_fragment.update(dt, meadow, platforms[-1],
                                   interact_pressed and 'memory_intro' in story.completed and not story.blocked
                                   and (not level2_combat or level2_combat.cleared)):
             story.on_memory()
             interact_pressed = False
-            save_progress()  # Persist the pickup immediately, not at the next autosave.
+            save_progress()  # Save the pickup right away.
 
         if interact_pressed and not story.blocked and story.portal_near(meadow, platforms[-1]):
             story.set_phase('exit_fade')
@@ -587,15 +632,17 @@ while running:
 
     for platform, art in zip(platforms, platform_art):
         draw_island(platform, art, camera_x, camera_y)
-    draw_island(moving_platform, platform_art[-1], camera_x, camera_y)
+    if current_level != 3:
+        draw_island(moving_platform, platform_art[-1], camera_x, camera_y)
 
     memory_fragment.draw(screen, camera_x, camera_y, show_prompt=not story.blocked and "memory_intro" in story.completed
                          and (not level2_combat or level2_combat.cleared))
     story.draw_portal(screen, platforms[-1], camera_x, camera_y, ZOOM, meadow)
-    healing_orb.draw(screen, camera_x, camera_y, show_prompt=not story.blocked and "healing_intro" in story.completed)
+    if current_level in (1,3) or story.flying_cleared:
+        healing_orb.draw(screen, camera_x, camera_y, show_prompt=not story.blocked and "healing_intro" in story.completed)
 
-    # Rounded gravity can clear on_ground for a frame despite exact contact.
-    # This check affects drawing only, leaving collision and physics intact.
+    # Rounding can briefly mark Meadow airborne while she is standing.
+    # Adjust only the animation, not the physics.
     supported = on_ground or (
         velocity_y >= 0
         and any(
@@ -605,7 +652,7 @@ while running:
             for platform in all_platforms
         )
     )
-    # Airborne takes priority over directional input. Riding a platform is idle.
+    # Use jump frames in the air and idle frames when riding a platform.
     if not supported:
         next_state = "jump"
     elif dx != 0 and meadow.x != before_move_x:
@@ -622,7 +669,7 @@ while running:
     frames = (animations if facing_right else animations_left)[animation_state]
     frame_number = int(animation_time * ANIMATION_FPS[animation_state])
     if animation_state == "jump":
-        # Play the four existing jump poses once, then hold the last until landing.
+        # Play the jump once and hold its last frame until landing.
         frame_number = min(frame_number, len(frames) - 1)
     else:
         animation_time %= len(frames) / ANIMATION_FPS[animation_state]
@@ -630,13 +677,15 @@ while running:
     current_image = frames[frame_number]
     if crouch.active and supported:
         current_image = crouch.image(facing_right)
+    elif meadow_attack.active:
+        current_image = meadow_attack.image()
 
     draw_x = (
         round((meadow.centerx - camera_x) * ZOOM)
         - current_image.get_width() // 2
     )
 
-    # All poses share a baseline; only drawing changes, never the collider.
+    # Keep the feet aligned without changing the collision box.
     draw_y = (round((meadow.bottom - camera_y) * ZOOM)
               - current_image.get_height())
 
@@ -651,7 +700,7 @@ while running:
                           shadow.state in ('warning','fly'))
         if not level2_combat.cleared and memory_fragment.near:
             draw_instruction(screen, opening_tutorial.font,
-                             ['Defeat both duel shadows', 'to claim this memory'], (WIDTH//2,180))
+                             ['Defeat both ground creatures', 'to claim this memory'], (WIDTH//2,180))
     shadow.draw(screen, camera_x, camera_y)
     health.draw(screen)
     memory_fragment.draw_hud(screen)
@@ -660,13 +709,9 @@ while running:
                               shadow.state in ('warning', 'fly') or shadow.hit_notice > 0,
                               anchor=(round((meadow.centerx-camera_x)*ZOOM),
                                       round((meadow.bottom-105-camera_y)*ZOOM)))
-        if current_level == 1:
-            shadow.draw_hint(screen)
-    if story.phase == 'shadow_tutorial':
-        draw_instruction(screen, opening_tutorial.font,
-                         ['Shadow approaching!', 'Hold S or DOWN to crouch'],
-                         (round((meadow.centerx-camera_x)*ZOOM),
-                          round((meadow.bottom-105-camera_y)*ZOOM)))
+        if current_level == 1 and shadow.state in ('warning','fly'):
+            draw_instruction(screen, opening_tutorial.font, ['Hold S or DOWN to duck!'],
+                             (round((meadow.centerx-camera_x)*ZOOM),round((meadow.bottom-105-camera_y)*ZOOM)))
     story.draw(screen)
     if story.dirty:
         if save_progress():

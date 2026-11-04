@@ -1,4 +1,4 @@
-"""Health, the one-use healing crystal, and the opening gameplay tutorial."""
+"""Handle health, the healing crystal, and tutorial hints."""
 import math
 import pygame
 from instruction_ui import draw_instruction
@@ -36,7 +36,7 @@ class Health:
         self.update_display(dt)
 
     def update_display(self,dt):
-        """Animate the HUD even when dialogue freezes gameplay timers."""
+        """Update the health bar while dialogue is open."""
         self.display_hp+=(self.current-self.display_hp)*(1-math.exp(-12*dt))
 
     @property
@@ -48,7 +48,7 @@ class Health:
         return (231,74,86)
 
     def draw(self,screen):
-        # Screen coordinates only: camera movement and zoom cannot move this HUD.
+        # Keep the health bar fixed on screen.
         panel=pygame.Surface((280,76),pygame.SRCALPHA)
         panel.fill((9,19,27,230))
         pygame.draw.rect(panel,(175,153,99),(0,0,280,76),1,border_radius=8)
@@ -83,6 +83,7 @@ class HealingOrb:
                 frames.append(pygame.transform.smoothscale(image.premul_alpha(),(round(72*zoom),round(72*zoom))))
             self.frames[state]=frames
         self.font=pygame.font.SysFont('Segoe UI',17,bold=True)
+        self.horizontal_offset=190
         self.reset(False)
 
     def reset(self,collected):
@@ -98,17 +99,17 @@ class HealingOrb:
         self.time+=dt
         self.float_time+=dt
         if self.state!='pickup':
-            self.position.update(min(platform.right-45,platform.left+190),
+            self.position.update(min(platform.right-45,platform.left+self.horizontal_offset),
                                  platform.top-34+4*math.sin(self.float_time*2))
         if self.state in ('spawn','pickup') and self.time>=len(self.frames[self.state])/self.FPS[self.state]:
             self.state='idle' if self.state=='spawn' else 'gone'
             self.time=0.0
-        # A world-space radius around Meadow's torso, not screen/camera pixels.
+        # Check how close Meadow is to the crystal.
         torso=pygame.Vector2(player.centerx,player.bottom-30)
         self.near=(not self.collected and self.state=='idle'
                    and torso.distance_to(self.position)<=self.INTERACTION_RANGE)
         if interact and self.near:
-            self.collected=True  # Lock immediately, including during the pickup frames.
+            self.collected=True  # Prevent collecting the crystal twice.
             self.near=False
             self.state,self.time='pickup',0.0
             health.heal(self.HEAL_AMOUNT)
@@ -122,11 +123,11 @@ class HealingOrb:
         index=int(self.time*self.FPS[self.state])
         index=index%len(frames) if self.state=='idle' else min(index,len(frames)-1)
         center=(round((self.position.x-camera_x)*self.zoom),round((self.position.y-camera_y)*self.zoom))
-        # Premultiplied alpha keeps the green crystal's color against the blue forest.
+        # Keep transparent edges from looking dark.
         screen.blit(frames[index],frames[index].get_rect(center=center),special_flags=pygame.BLEND_PREMULTIPLIED)
         if self.near and show_prompt:
             draw_instruction(screen, self.font,
-                             ['Press E to absorb', 'healing energy'],
+                             ['Press E to collect', 'the Healing Crystal.'],
                              (center[0], center[1]-120))
 
 

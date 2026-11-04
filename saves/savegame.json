@@ -1,46 +1,83 @@
 {
   "version": 1,
-  "x": 180,
-  "y": 430,
+  "x": 2113,
+  "y": 140,
   "velocity_y": 0,
   "on_ground": true,
   "facing_right": true,
   "widths": [
     300,
     270,
-    280,
-    290,
-    210
+    270,
+    250,
+    310,
+    280
   ],
   "islands": [
     0,
     4,
-    4,
+    2,
     1,
+    4,
     3
   ],
-  "moving_x": 804,
+  "moving_x": 378,
   "moving_speed": 2,
-  "memory_collected": false,
-  "hp": 15,
+  "memory_collected": true,
+  "hp": 50,
   "healing_collected": true,
   "tutorial_seen": true,
   "narrative": {
+    "version": 5,
     "completed": [
-      "healing_after",
       "healing_intro",
+      "l3_arrival",
+      "l3_first_after",
+      "l3_first_before",
+      "l3_flying",
+      "l3_healing_after",
+      "l3_healing_intro",
+      "l3_memory_after",
+      "l3_memory_intro",
+      "l3_safe",
+      "l3_two_after",
+      "l3_two_before",
       "memory_intro",
       "opening"
     ],
-    "phase": "gameplay",
-    "time": 31.931999999998904,
-    "scene": null,
-    "line": 0,
-    "shadow_resolved": false
+    "phase": "chapter",
+    "time": 2.4279999999999973,
+    "scene": "l3_memory_after",
+    "line": 3,
+    "reveal": 0.0,
+    "shadow_resolved": false,
+    "flying_cleared": true,
+    "next_memory_pending": true,
+    "heal_waiting": false,
+    "reaction_queue": [],
+    "reaction": {
+      "scene": null,
+      "line": 3
+    }
   },
-  "level": 2,
+  "level": 3,
   "duels": [
-    1,
-    2
+    0,
+    0
+  ],
+  "level2_healing_collected": false,
+  "moving_islands": [
+    {
+      "x": 378.3440000000009,
+      "direction": -1
+    },
+    {
+      "x": 1202.5199999999995,
+      "direction": -1
+    },
+    {
+      "x": 1629.1899999999991,
+      "direction": -1
+    }
   ]
 }

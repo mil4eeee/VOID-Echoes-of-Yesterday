@@ -42,17 +42,17 @@ class LevelTwoTests(unittest.TestCase):
         self.combat.update(.01,self.player,True,False,self.health)
         self.assertEqual(self.health.current,55)
 
-    def test_attack_requires_recovery_range_direction_and_cooldown(self):
-        self.combat.update(.01,self.player,True,True,self.health)
-        self.assertEqual(self.enemy.hp,2)
-        self.enemy.state='recovery'
-        self.combat.update(.01,self.player,True,True,self.health)
-        self.assertEqual(self.enemy.hp,2)
-        self.combat.update(.41,self.player,False,True,self.health)
-        self.assertEqual(self.enemy.hp,2)
-        self.enemy.state='recovery';self.enemy.time=0
-        self.combat.update(.41,self.player,True,True,self.health)
+    def test_attacks_connect_outside_active_lunge_and_obey_direction(self):
+        self.enemy.state='windup'
+        self.assertTrue(self.enemy.receive_attack(self.player,True))
         self.assertEqual(self.enemy.hp,1)
+        self.assertEqual(self.enemy.state,'windup')
+        self.enemy.state='strike'
+        self.assertFalse(self.enemy.receive_attack(self.player,True))
+        self.enemy.state='recovery'
+        self.assertFalse(self.enemy.receive_attack(self.player,False))
+        self.assertTrue(self.enemy.receive_attack(self.player,True))
+        self.assertTrue(self.enemy.defeated)
 
     def test_combined_encounter_waits_for_flying_shadow(self):
         enemy=self.combat.enemies[1]
@@ -71,16 +71,17 @@ class LevelTwoTests(unittest.TestCase):
         self.combat.restore([0,0]);self.assertTrue(self.combat.cleared)
         self.combat.restore([-1,100]);self.assertEqual(self.combat.snapshot(),[0,0])
 
-    def test_chapter_title_fade_and_no_level_one_dialogue(self):
+    def test_level_two_fade_arrival_and_pending_memory(self):
         story=LevelTwoStory()
-        self.assertEqual(story.phase,'level2_title')
-        story.update(2,None);self.assertEqual(story.phase,'opening_fade')
-        story.update(1,None);self.assertFalse(story.blocked)
-        self.assertIsNone(story.dialogue.scene)
+        self.assertEqual(story.phase,'opening_fade')
+        story.update(2.99,None);self.assertTrue(story.blocked)
+        story.update(.02,None);self.assertEqual(story.dialogue.scene,'l2_arrival')
+        self.assertTrue(story.blocked)
         story.on_memory();story.update(.7,None)
-        self.assertEqual(story.phase,'chapter')
+        self.assertEqual(story.phase,'dialogue');self.assertTrue(story.second_memory_pending)
+        self.assertEqual(story.dialogue.scene,'l2_memory_before')
         restored=LevelTwoStory();restored.reset(story.snapshot())
-        self.assertEqual(restored.phase,'chapter')
+        self.assertEqual(restored.dialogue.scene,'l2_memory_before');self.assertTrue(restored.second_memory_pending)
 
     def test_level_two_save_validation_and_legacy_rejection(self):
         data=dict(version=1,level=2,x=1700,y=175,velocity_y=0,on_ground=True,
